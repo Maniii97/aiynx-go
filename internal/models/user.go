@@ -77,9 +77,5 @@ func validateDOB(fl validator.FieldLevel) bool {
 
 	// Rolling 130-year window: ages gracefully without a magic hardcoded year.
 	minDate := time.Now().UTC().AddDate(-130, 0, 0)
-	if t.Before(minDate) {
-		return false
-	}
-
-	return true
+	return !t.Before(minDate)
 }

@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Pass all env vars from .env — DATABASE_URL points at Neon (external),
+    # so no local Postgres container is needed.
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-3000}:${APP_PORT:-3000}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT:-3000}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

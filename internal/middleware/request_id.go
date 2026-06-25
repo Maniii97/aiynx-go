@@ -5,11 +5,21 @@ import (
 	"github.com/google/uuid"
 )
 
-// RequestID generates a UUID for every request, stores it in Fiber locals,
-// and injects it as the X-Request-ID response header.
+// RequestID ensures every request has a unique X-Request-ID.
+//
+// Priority:
+//  1. If the incoming request already carries an X-Request-ID header
+//     (e.g. set by a client SDK or upstream proxy), that value is reused.
+//  2. Otherwise a new UUID-v4 is generated.
+//
+// The ID is stored in c.Locals("requestId") so that the Logger middleware
+// and all handlers can read it without re-parsing the header.
 func RequestID() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		id := uuid.New().String()
+		id := c.Get("X-Request-ID")
+		if id == "" {
+			id = uuid.New().String()
+		}
 		c.Locals("requestId", id)
 		c.Set("X-Request-ID", id)
 		return c.Next()

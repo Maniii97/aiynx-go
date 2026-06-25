@@ -1,16 +1,25 @@
 -- name: CreateUser :one
-INSERT INTO users (name, dob)
-VALUES ($1, $2)
+INSERT INTO users (name, dob, email, password_hash, role)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetUserByID :one
+SELECT * FROM users WHERE id = $1;
+
+-- name: GetUserByEmail :one
 SELECT * FROM users
-WHERE id = $1;
+WHERE email = $1;
 
 -- name: UpdateUser :one
 UPDATE users
 SET name = $1, dob = $2
 WHERE id = $3
+RETURNING *;
+
+-- name: UpdateUserPassword :one
+UPDATE users
+SET password_hash = $1, updated_at = NOW()
+WHERE id = $2
 RETURNING *;
 
 -- name: DeleteUser :exec

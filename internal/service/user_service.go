@@ -14,7 +14,7 @@ import (
 
 // UserService defines the business-logic interface for user operations.
 type UserService interface {
-	CreateUser(ctx context.Context, req models.CreateUserRequest) (models.UserResponse, error)
+	CreateUser(ctx context.Context, req models.SignupRequest) (models.UserResponse, error)
 	GetUserByID(ctx context.Context, id int64) (models.UserResponse, error)
 	UpdateUser(ctx context.Context, id int64, req models.UpdateUserRequest) (models.UserResponse, error)
 	DeleteUser(ctx context.Context, id int64) error
@@ -22,12 +22,14 @@ type UserService interface {
 }
 
 type userServiceImpl struct {
-	repo repository.UserRepository
+	repo     repository.UserRepository
+	authSvc  AuthService
 }
 
 // NewUserService constructs a UserService with the given repository.
-func NewUserService(repo repository.UserRepository) UserService {
-	return &userServiceImpl{repo: repo}
+// authSvc is used for password hashing when creating users via POST /users.
+func NewUserService(repo repository.UserRepository, authSvc AuthService) UserService {
+	return &userServiceImpl{repo: repo, authSvc: authSvc}
 }
 
 // CalculateAge returns the age in full years as of today (UTC).
@@ -46,10 +48,18 @@ func CalculateAge(dob time.Time) int {
 
 // ─── Service Methods ─────────────────────────────────────────────────────────
 
-func (s *userServiceImpl) CreateUser(ctx context.Context, req models.CreateUserRequest) (models.UserResponse, error) {
+func (s *userServiceImpl) CreateUser(ctx context.Context, req models.SignupRequest) (models.UserResponse, error) {
 	dob, _ := time.Parse("2006-01-02", req.DOB) // already validated upstream
 
-	user, err := s.repo.Create(ctx, req.Name, dob)
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		logger.Log.Error("failed to hash password", zap.Error(err))
+		return models.UserResponse{}, err
+	}
+
+	role := "user"
+
+	user, err := s.repo.CreateWithAuth(ctx, req.Name, dob, req.Email, hash, role)
 	if err != nil {
 		logger.Log.Error("failed to create user", zap.Error(err))
 		return models.UserResponse{}, err
@@ -57,9 +67,11 @@ func (s *userServiceImpl) CreateUser(ctx context.Context, req models.CreateUserR
 
 	logger.Log.Info("user created", zap.Int64("user_id", user.ID))
 	return models.UserResponse{
-		ID:   user.ID,
-		Name: user.Name,
-		DOB:  user.Dob.Format("2006-01-02"),
+		ID:    user.ID,
+		Name:  user.Name,
+		DOB:   user.Dob.Format("2006-01-02"),
+		Email: user.Email,
+		Role:  user.Role,
 		// Age intentionally omitted from create response per spec.
 	}, nil
 }
@@ -78,10 +90,12 @@ func (s *userServiceImpl) GetUserByID(ctx context.Context, id int64) (models.Use
 	logger.Log.Info("user fetched", zap.Int64("user_id", user.ID))
 	age := CalculateAge(user.Dob)
 	return models.UserResponse{
-		ID:   user.ID,
-		Name: user.Name,
-		DOB:  user.Dob.Format("2006-01-02"),
-		Age:  &age,
+		ID:    user.ID,
+		Name:  user.Name,
+		DOB:   user.Dob.Format("2006-01-02"),
+		Age:   &age,
+		Email: user.Email,
+		Role:  user.Role,
 	}, nil
 }
 
@@ -146,10 +160,12 @@ func (s *userServiceImpl) ListUsers(ctx context.Context, page, limit int) (model
 	for _, u := range users {
 		age := CalculateAge(u.Dob)
 		data = append(data, models.UserResponse{
-			ID:   u.ID,
-			Name: u.Name,
-			DOB:  u.Dob.Format("2006-01-02"),
-			Age:  &age,
+			ID:    u.ID,
+			Name:  u.Name,
+			DOB:   u.Dob.Format("2006-01-02"),
+			Age:   &age,
+			Email: u.Email,
+			Role:  u.Role,
 		})
 	}
 

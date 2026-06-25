@@ -12,3 +12,7 @@ bin/
 .DS_Store
 .idea/
 .vscode/
+
+
+CODEBASE_GUIDE.html
+INTERVIEW_PREP.html

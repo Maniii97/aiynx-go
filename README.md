@@ -1,13 +1,14 @@
-# aiynx-go — User API with Dynamic Age Calculation
+# aiynx-go — User API with Auth, JWT & RBAC
 
 ## Overview
 
 `aiynx-go` is a production-ready RESTful API built in Go that manages users
-(name + date of birth). When fetching users, the API dynamically calculates
-and returns the user's age using Go's standard `time` package — age is **never
-stored** in the database. The project uses Fiber v2, PostgreSQL (Neon serverless),
-SQLC for type-safe query codegen, pgx/v5 for connection pooling, Zap for
-structured logging, and go-playground/validator for input validation.
+(name, date of birth, email, role). It features:
+
+- **JWT authentication** (HS256, Bearer header + HttpOnly cookie)
+- **Role-based access control** (`user` / `admin`)
+- Dynamic age calculation — age is **never stored** in the database
+- Fiber v2, PostgreSQL (Neon serverless), SQLC, pgx/v5, Zap, go-playground/validator
 
 ---
 
@@ -18,7 +19,6 @@ structured logging, and go-playground/validator for input validation.
 | Go | ≥ 1.23 | https://go.dev/dl |
 | SQLC | latest | `go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest` |
 | golangci-lint | latest | https://golangci-lint.run/usage/install |
-| psql | any | bundled with PostgreSQL client tools |
 | Docker & Compose | any | https://docs.docker.com/get-docker *(optional)* |
 
 ---
@@ -30,15 +30,15 @@ structured logging, and go-playground/validator for input validation.
 git clone https://github.com/Maniii97/aiynx-go.git
 cd aiynx-go
 
-# 2. Copy the environment template and fill in your Neon DATABASE_URL
+# 2. Copy the environment template and fill in real values
 cp .env.example .env
-# Edit .env and set DATABASE_URL, APP_PORT, APP_ENV
+# Edit .env — set DATABASE_URL and JWT_SECRET at minimum
 
-# 3. Apply the database migration
+# 3. Apply database migrations (runs all files in db/migrations/ in order)
 make migrate
 
 # 4. Generate type-safe Go code from SQL queries
-make sqlc           # runs: sqlc generate
+make sqlc
 
 # 5. Download Go module dependencies
 go mod tidy
@@ -46,15 +46,27 @@ go mod tidy
 
 ---
 
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ | — | PostgreSQL connection string |
+| `JWT_SECRET` | ✅ | — | HMAC signing secret (min 32 chars) |
+| `APP_PORT` | | `3000` | HTTP listen port |
+| `APP_ENV` | | `development` | `development` or `production` |
+| `JWT_EXPIRY_HOURS` | | `24` | Token TTL in hours |
+
+> **Generate a strong JWT secret:** `openssl rand -hex 32`
+
+---
+
 ## Running the Server
 
 ```bash
 make run
-# or equivalently:
+# or:
 go run ./cmd/server/main.go
 ```
-
-The server starts on the port defined in `APP_PORT` (default `3000`).
 
 ---
 
@@ -62,7 +74,7 @@ The server starts on the port defined in `APP_PORT` (default `3000`).
 
 ```bash
 make test
-# or equivalently:
+# or:
 go test -v -race ./...
 ```
 
@@ -70,73 +82,103 @@ go test -v -race ./...
 
 ## API Reference
 
+### Public Routes (no auth)
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check — returns `{"status":"ok"}` |
-| `POST` | `/users` | Create a user (`name`, `dob` required) |
-| `GET` | `/users` | List users with pagination (`?page=1&limit=10`) |
-| `GET` | `/users/:id` | Get a user by ID (includes calculated `age`) |
+| `GET` | `/health` | Health check |
+| `POST` | `/auth/signup` | Register a new user |
+| `POST` | `/auth/login` | Login — returns JWT + sets cookie |
+
+### Authenticated Routes (JWT required)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/users/me` | Current user's profile (from token) |
+| `GET` | `/users` | List users with pagination |
+| `GET` | `/users/:id` | Get a user by ID |
+| `POST` | `/users` | Create a user (requires email + password) |
 | `PUT` | `/users/:id` | Update a user's name and DOB |
-| `DELETE` | `/users/:id` | Delete a user (returns 204 No Content) |
 
-### Request / Response examples
+### Admin-Only Routes (JWT + `admin` role)
 
-**POST /users**
+| Method | Path | Description |
+|---|---|---|
+| `DELETE` | `/admin/users/:id` | Delete a user |
+| `GET` | `/admin/users` | List all users (admin view) |
+
+---
+
+### Authentication
+
+**Signup — POST /auth/signup**
 ```json
 // Request
-{ "name": "Alice", "dob": "1990-05-10" }
+{ "name": "Alice", "dob": "1990-05-10", "email": "alice@example.com", "password": "StrongPass1!" }
 
 // Response 201
-{ "id": 1, "name": "Alice", "dob": "1990-05-10" }
+{ "id": 1, "name": "Alice", "email": "alice@example.com", "role": "user" }
 ```
 
-**GET /users/1**
+Password rules: min 8 chars, at least 1 uppercase, 1 digit, 1 special character.
+
+**Login — POST /auth/login**
 ```json
-// Response 200
-{ "id": 1, "name": "Alice", "dob": "1990-05-10", "age": 35 }
+// Request
+{ "email": "alice@example.com", "password": "StrongPass1!" }
+
+// Response 200 — also sets auth_token HttpOnly cookie
+{ "token": "<jwt>", "role": "user" }
 ```
 
-**GET /users?page=1&limit=10**
+**Using the token** — include it in the `Authorization` header:
+```
+Authorization: Bearer <jwt>
+```
+Or the cookie `auth_token` is sent automatically by the browser.
+
+**GET /users/me**
 ```json
 // Response 200
+{ "id": 1, "name": "Alice", "email": "alice@example.com", "dob": "1990-05-10", "age": 35, "role": "user" }
+```
+
+---
+
+### Standard Error Envelope
+
+All errors return a consistent JSON shape:
+```json
 {
-  "data": [{ "id": 1, "name": "Alice", "dob": "1990-05-10", "age": 35 }],
-  "meta": { "page": 1, "limit": 10, "total": 1 }
+  "error": {
+    "message": "human-readable description",
+    "code": "MACHINE_READABLE_CODE",
+    "request_id": "uuid-v4"
+  }
 }
 ```
 
-### Error envelope
-
-All errors follow a consistent JSON shape:
-```json
-{ "error": "human-readable message" }
-```
-
-| Scenario | Status |
-|---|---|
-| Body parse failure | 400 |
-| Validation failure | 422 |
-| Invalid `:id` param | 400 |
-| User not found | 404 |
-| Unexpected error | 500 |
+| Scenario | Status | Code |
+|---|---|---|
+| Parse / bad JSON | 400 | `BAD_REQUEST` |
+| Validation failure | 422 | `VALIDATION_ERROR` |
+| Invalid `:id` param | 400 | `INVALID_PARAM` |
+| Email already exists | 409 | `CONFLICT` |
+| Wrong credentials | 401 | `INVALID_CREDENTIALS` |
+| Missing / invalid token | 401 | `UNAUTHORIZED` |
+| Insufficient role | 403 | `FORBIDDEN` |
+| Resource not found | 404 | `NOT_FOUND` |
+| Unexpected / DB error | 500 | `INTERNAL_ERROR` |
 
 ---
 
 ## Docker
 
 ```bash
-# Build and start the API container
-docker compose up --build
-
-# Run in background
-docker compose up -d --build
-
-# Stop
-docker compose down
+docker compose up --build      # build and start
+docker compose up -d --build   # background
+docker compose down            # stop
 ```
-
-The container exposes the port defined in `APP_PORT` and includes a
-`HEALTHCHECK` that polls `GET /health` every 30 seconds.
 
 ---
 
@@ -144,20 +186,33 @@ The container exposes the port defined in `APP_PORT` and includes a
 
 ```
 .
-├── cmd/server/main.go          # Entry point — wires everything
+├── cmd/
+│   ├── server/main.go          # Entry point — wires everything
+│   └── migrate/main.go         # Runs all migrations in order
 ├── config/config.go            # Typed config from env vars
 ├── db/
-│   ├── migrations/             # Plain SQL migration files
+│   ├── migrations/             # Plain SQL migration files (000001, 000002…)
 │   └── sqlc/                   # SQLC-generated code (do not edit)
 ├── internal/
-│   ├── handler/                # HTTP handlers (parse → service → respond)
-│   ├── middleware/             # RequestID + request logger
-│   ├── models/                 # Request/response DTOs + custom validators
+│   ├── handler/
+│   │   ├── user_handler.go     # User CRUD + /users/me
+│   │   └── auth_handler.go     # Signup + Login
+│   ├── middleware/
+│   │   ├── request_id.go       # Reuses or generates X-Request-ID
+│   │   ├── logger.go           # Zap request logger
+│   │   ├── auth.go             # JWT validation middleware + GetAuthUser helper
+│   │   └── rbac.go             # RequireRole middleware
+│   ├── models/
+│   │   ├── user.go             # User DTOs + validators
+│   │   ├── auth.go             # Auth DTOs (signup, login, me)
+│   │   └── error.go            # Standard error envelope
 │   ├── repository/             # Thin SQLC wrapper
-│   ├── routes/                 # Route registration
-│   ├── service/                # Business logic (age calculation lives here)
+│   ├── routes/routes.go        # Route groups (public / auth / admin)
+│   ├── service/
+│   │   ├── user_service.go     # User CRUD business logic
+│   │   └── auth_service.go     # bcrypt, JWT, signup, login
 │   └── logger/                 # Global Zap logger initialisation
-├── sqlc.yaml                   # SQLC configuration
+├── sqlc.yaml
 ├── Makefile
 ├── Dockerfile
 └── docker-compose.yml

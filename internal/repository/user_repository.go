@@ -15,8 +15,10 @@ var ErrNotFound = errors.New("user not found")
 // UserRepository defines the data-access interface for users.
 // Keeping it as an interface makes the service layer testable via mocks.
 type UserRepository interface {
-	Create(ctx context.Context, name string, dob time.Time) (sqlcdb.User, error)
+	// CreateWithAuth creates a user with full auth fields.
+	CreateWithAuth(ctx context.Context, name string, dob time.Time, email, passwordHash, role string) (sqlcdb.User, error)
 	GetByID(ctx context.Context, id int64) (sqlcdb.User, error)
+	GetByEmail(ctx context.Context, email string) (sqlcdb.User, error)
 	Update(ctx context.Context, id int64, name string, dob time.Time) (sqlcdb.User, error)
 	Delete(ctx context.Context, id int64) error
 	List(ctx context.Context, limit, offset int32) ([]sqlcdb.User, error)
@@ -34,15 +36,29 @@ func NewUserRepository(db *sql.DB) UserRepository {
 	return &pgxUserRepository{queries: sqlcdb.New(db)}
 }
 
-func (r *pgxUserRepository) Create(ctx context.Context, name string, dob time.Time) (sqlcdb.User, error) {
+func (r *pgxUserRepository) CreateWithAuth(ctx context.Context, name string, dob time.Time, email, passwordHash, role string) (sqlcdb.User, error) {
 	return r.queries.CreateUser(ctx, sqlcdb.CreateUserParams{
-		Name: name,
-		Dob:  dob,
+		Name:         name,
+		Dob:          dob,
+		Email:        email,
+		PasswordHash: passwordHash,
+		Role:         role,
 	})
 }
 
 func (r *pgxUserRepository) GetByID(ctx context.Context, id int64) (sqlcdb.User, error) {
 	user, err := r.queries.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sqlcdb.User{}, ErrNotFound
+		}
+		return sqlcdb.User{}, err
+	}
+	return user, nil
+}
+
+func (r *pgxUserRepository) GetByEmail(ctx context.Context, email string) (sqlcdb.User, error) {
+	user, err := r.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sqlcdb.User{}, ErrNotFound

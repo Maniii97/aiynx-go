@@ -2,6 +2,7 @@ package models
 
 import (
 	"time"
+	"unicode"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -26,10 +27,12 @@ type UpdateUserRequest struct {
 // Age is a pointer so it is omitted (omitempty) when not populated
 // (e.g. create / update responses don't include age).
 type UserResponse struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	DOB  string `json:"dob"`
-	Age  *int   `json:"age,omitempty"`
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	DOB   string `json:"dob"`
+	Age   *int   `json:"age,omitempty"`
+	Email string `json:"email,omitempty"`
+	Role  string `json:"role,omitempty"`
 }
 
 // PaginationMeta carries paging metadata in list responses.
@@ -52,6 +55,9 @@ type PaginatedUsersResponse struct {
 func RegisterCustomValidators(v *validator.Validate) {
 	if err := v.RegisterValidation("dob_date", validateDOB); err != nil {
 		panic("failed to register dob_date validator: " + err.Error())
+	}
+	if err := v.RegisterValidation("password_strength", validatePasswordStrength); err != nil {
+		panic("failed to register password_strength validator: " + err.Error())
 	}
 }
 
@@ -78,4 +84,30 @@ func validateDOB(fl validator.FieldLevel) bool {
 	// Rolling 130-year window: ages gracefully without a magic hardcoded year.
 	minDate := time.Now().UTC().AddDate(-130, 0, 0)
 	return !t.Before(minDate)
+}
+
+// validatePasswordStrength enforces that a password has:
+//  1. Minimum 8 characters
+//  2. At least one uppercase letter
+//  3. At least one digit
+//  4. At least one special (non-letter, non-digit) character
+//
+// Uses the stdlib unicode package — no third-party password library.
+func validatePasswordStrength(fl validator.FieldLevel) bool {
+	pw := fl.Field().String()
+	if len(pw) < 8 {
+		return false
+	}
+	var hasUpper, hasDigit, hasSpecial bool
+	for _, r := range pw {
+		switch {
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+			hasSpecial = true
+		}
+	}
+	return hasUpper && hasDigit && hasSpecial
 }

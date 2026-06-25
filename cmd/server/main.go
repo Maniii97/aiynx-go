@@ -52,10 +52,14 @@ func main() {
 	v := validator.New()
 	models.RegisterCustomValidators(v)
 
-	// ── 5. Wire dependencies (Repository → Service → Handler) ─────────────────
+	// ── 5. Wire dependencies (Repository → Services → Handlers) ───────────────
 	repo := repository.NewUserRepository(db)
-	svc := service.NewUserService(repo)
-	h := handler.NewUserHandler(svc, v)
+
+	authSvc := service.NewAuthService(repo)
+	userSvc := service.NewUserService(repo, authSvc)
+
+	userHandler := handler.NewUserHandler(userSvc, v)
+	authHandler := handler.NewAuthHandler(authSvc, v, cfg)
 
 	// ── 6. Fiber app ──────────────────────────────────────────────────────────
 	app := fiber.New(fiber.Config{
@@ -66,12 +70,19 @@ func main() {
 			if errors.As(err, &fe) {
 				code = fe.Code
 			}
-			logger.Log.Error("unhandled error", zap.Error(err))
-			return c.Status(code).JSON(fiber.Map{"error": "internal server error"})
+			requestID, _ := c.Locals("requestId").(string)
+			logger.Log.Error("unhandled error", zap.Error(err), zap.String("request_id", requestID))
+			return c.Status(code).JSON(models.ErrorResponse{
+				Error: models.ErrorDetail{
+					Message:   "internal server error",
+					Code:      "INTERNAL_ERROR",
+					RequestID: requestID,
+				},
+			})
 		},
 	})
 
-	routes.SetupRoutes(app, h)
+	routes.SetupRoutes(app, userHandler, authHandler, cfg)
 
 	// ── 7. Graceful shutdown ──────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
@@ -97,5 +108,3 @@ func main() {
 	// DB pool is closed via defer above.
 	logger.Log.Info("server exited cleanly")
 }
-
-

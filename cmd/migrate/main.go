@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/Maniii97/aiynx-go/config"
 	"github.com/jackc/pgx/v5"
@@ -23,19 +24,33 @@ func main() {
 	}
 	defer conn.Close(ctx)
 
-	// Read migration file
-	migrationPath := filepath.Join("db", "migrations", "000001_create_users.sql")
-	fmt.Printf("Reading migration file: %s\n", migrationPath)
-	content, err := os.ReadFile(migrationPath)
+	// Discover all migration files in order.
+	migrationsDir := filepath.Join("db", "migrations")
+	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		log.Fatalf("Unable to read migration file: %v\n", err)
+		log.Fatalf("Unable to read migrations directory: %v\n", err)
 	}
 
-	fmt.Println("Applying migration...")
-	_, err = conn.Exec(ctx, string(content))
-	if err != nil {
-		log.Fatalf("Failed to execute migration: %v\n", err)
+	// Collect .sql files and sort lexicographically (000001 < 000002 …).
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
+			files = append(files, filepath.Join(migrationsDir, e.Name()))
+		}
+	}
+	sort.Strings(files)
+
+	for _, path := range files {
+		fmt.Printf("Applying migration: %s\n", path)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			log.Fatalf("Unable to read migration file %s: %v\n", path, err)
+		}
+		if _, err = conn.Exec(ctx, string(content)); err != nil {
+			log.Fatalf("Failed to execute migration %s: %v\n", path, err)
+		}
+		fmt.Printf("  ✓ applied %s\n", filepath.Base(path))
 	}
 
-	fmt.Println("Migration applied successfully!")
+	fmt.Println("All migrations applied successfully!")
 }

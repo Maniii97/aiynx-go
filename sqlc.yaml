@@ -2,7 +2,9 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "db/sqlc/query.sql"
-    schema: "db/migrations/000001_create_users.sql"
+    schema:
+      - "db/migrations/000001_create_users.sql"
+      - "db/migrations/000002_add_auth_fields.sql"
     gen:
       go:
         package: "sqlcdb"

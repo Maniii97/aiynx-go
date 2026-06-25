@@ -1,4 +1,4 @@
-.PHONY: run build sqlc migrate lint test
+.PHONY: run build sqlc migrate lint test promote-admin create-admin
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 run:
